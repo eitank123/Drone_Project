@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Drone BLE Tester</title>
+    <style>
+        body { font-family: monospace; background: #111; color: #0f0; padding: 20px; max-width: 600px; margin: 0 auto; }
+        h1 { border-bottom: 1px solid #444; padding-bottom: 10px; }
+        h3 { margin-top: 0; color: #ccc; }
+        .control-group { background: #222; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #333; }
+        label { display: inline-block; width: 80px; }
+        input[type="range"] { width: 300px; cursor: pointer; }
+        button { background: #0f0; color: #000; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; font-family: monospace; margin-right: 10px; border-radius: 4px; }
+        button:hover { opacity: 0.8; }
+        button#disconnect { background: #f00; color: #fff; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        #log { background: #000; border: 1px solid #333; padding: 10px; height: 200px; overflow-y: scroll; font-size: 12px; margin-top: 20px; font-family: 'Courier New', Courier, monospace; }
+        .value-display { float: right; color: #fff; font-weight: bold; }
+        .instruction { background-color: #383818; color: #ff0; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="instruction">
+        👉 **INSTRUCTION:** If you see a **SecurityError**, open this file directly in Chrome (Right-click -> Open With -> Chrome).
+    </div>
+
+    <h1>🚁 BLE Drone Tester</h1>
+
+    <!-- CONNECTION SETTINGS -->
+    <div class="control-group">
+        <h3>1. Connection & Settings</h3>
+        <button id="connectBtn">CONNECT</button>
+        <button id="disconnectBtn" disabled>DISCONNECT</button>
+        <p id="status" style="margin-bottom: 15px;">Status: Disconnected</p>
+        <!-- The Loop Rate slider and display have been removed -->
+    </div>
+
+    <!-- FLIGHT CONTROLS -->
+    <div class="control-group">
+        <h3>2. Flight Controls</h3>
+        
+        <!-- THROTTLE -->
+        <div>
+            <label>Throttle</label>
+            <input type="range" id="throttle" min="1000" max="2000" value="1000">
+            <span class="value-display" id="val-throttle">1000</span>
+        </div>
+        <br>
+
+        <!-- ROLL -->
+        <div>
+            <label>Roll</label>
+            <input type="range" id="roll" min="-500" max="500" value="0">
+            <span class="value-display" id="val-roll">0</span>
+        </div>
+        <br>
+
+        <!-- PITCH -->
+        <div>
+            <label>Pitch</label>
+            <input type="range" id="pitch" min="-500" max="500" value="0">
+            <span class="value-display" id="val-pitch">0</span>
+        </div>
+        <br>
+
+        <!-- YAW -->
+        <div>
+            <label>Yaw</label>
+            <input type="range" id="yaw" min="-500" max="500" value="0">
+            <span class="value-display" id="val-yaw">0</span>
+        </div>
+        <br>
+
+        <!-- ARM -->
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
+            <label style="color: #f00; font-weight: bold;">ARMED</label>
+            <input type="checkbox" id="armed" style="width: 20px; height: 20px;">
+            <span class="value-display" id="val-armed" style="color: #f00;">FALSE</span>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+        const FIXED_INTERVAL_MS = 100; // Fixed 10Hz update rate
+
+        // --- VARIABLES ---
+        let device, server, service, characteristic;
+        let loopInterval = null;
+
+        // --- DOM ELEMENTS ---
+        const logDiv = document.getElementById('log');
+        const statusP = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        
+        // Removed rateInput
+        
+        const inputs = {
+            throttle: document.getElementById('throttle'),
+            roll: document.getElementById('roll'),
+            pitch: document.getElementById('pitch'),
+            yaw: document.getElementById('yaw'),
+            armed: document.getElementById('armed')
+        };
+
+        // --- LOGGING ---
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div>[${time}] ${msg}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        }
+
+        // --- UPDATE UI VALUES ---
+        function updateDisplays() {
+            document.getElementById('val-throttle').innerText = inputs.throttle.value;
+            document.getElementById('val-roll').innerText = inputs.roll.value;
+            document.getElementById('val-pitch').innerText = inputs.pitch.value;
+            document.getElementById('val-yaw').innerText = inputs.yaw.value;
+            
+            const isArmed = inputs.armed.checked;
+            const armDisplay = document.getElementById('val-armed');
+            armDisplay.innerText = isArmed ? "TRUE" : "FALSE";
+            armDisplay.style.color = isArmed ? "#0f0" : "#f00";
+        }
+
+        // Add listeners
+        Object.values(inputs).forEach(el => el.addEventListener('input', updateDisplays));
+        // Removed rateInput listener
+
+        // --- CONNECT LOGIC ---
+        connectBtn.addEventListener('click', async () => {
+            try {
+                log('Requesting Bluetooth Device...');
+                
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'ESP32' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                log('Connecting to GATT Server...');
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+                server = await device.gatt.connect();
+
+                log('Getting Service...');
+                service = await server.getPrimaryService(SERVICE_UUID);
+
+                log('Getting Characteristic...');
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+
+                log(`✅ Connected! Starting fixed loop at ${1000 / FIXED_INTERVAL_MS}Hz...`);
+                
+                statusP.innerText = "Status: CONNECTED";
+                statusP.style.color = "#0f0";
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+
+                startLoop();
+
+            } catch (error) {
+                log('❌ Connection Failed: ' + error);
+            }
+        });
+
+        // --- DISCONNECT LOGIC ---
+        disconnectBtn.addEventListener('click', () => {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+            }
+        });
+
+        function onDisconnected() {
+            log('⚠️ Device Disconnected');
+            statusP.innerText = "Status: Disconnected";
+            statusP.style.color = "#fff";
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            stopLoop();
+        }
+
+        // --- DATA LOOP ---
+        function startLoop() {
+            if (loopInterval) clearInterval(loopInterval);
+            
+            // Reverted to fixed interval
+            loopInterval = setInterval(sendData, FIXED_INTERVAL_MS); 
+        }
+
+        function stopLoop() {
+            if (loopInterval) clearInterval(loopInterval);
+        }
+
+        async function sendData() {
+            if (!characteristic) return;
+
+            const buffer = new ArrayBuffer(9);
+            const view = new DataView(buffer);
+
+            const throttle = parseInt(inputs.throttle.value);
+            const roll = parseInt(inputs.roll.value);
+            const pitch = parseInt(inputs.pitch.value);
+            const yaw = parseInt(inputs.yaw.value);
+            const armed = inputs.armed.checked ? 1 : 0;
+
+            // Pack Data (Little Endian for ESP32)
+            view.setInt16(0, throttle, true);
+            view.setInt16(2, roll, true);
+            view.setInt16(4, pitch, true);
+            view.setInt16(6, yaw, true);
+            view.setUint8(8, armed);
+
+            try {
+                // Fire and forget (no await) to prevent UI blocking
+                characteristic.writeValue(buffer)
+                    .catch(err => {
+                        // Only log specific errors to avoid console spam on congestion
+                        if (err.name === 'NetworkError') {
+                            console.warn("Packet dropped (Congestion)");
+                        } else {
+                            log('Write Error: ' + err);
+                        }
+                    });
+            } catch (err) {
+                log('Unexpected Error: ' + err);
+            }
+        }
+
+        // Initialize displays on load
+        updateDisplays();
+
+    </script>
+</body>
+</html>
