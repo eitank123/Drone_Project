@@ -11,11 +11,14 @@ unsigned long lastDebugTime = 0;
 
 RCInputData* inputData = new RCInputData();
 
-PID pidRoll(1.5, 0.0, 0.5, 400);  
-PID pidPitch(1.5, 0.0, 0.5, 400);
-PID pidYaw(3.0, 0.0, 0.0, 400);
+PID pidRoll(kpRoll, kiRoll, kdRoll, 400);  
+PID pidPitch(kpPitch, kiPitch, kdPitch, 400);
+PID pidYaw(kpYaw, kiYaw, kdYaw, 400);
 
 unsigned long last_pid_time = 0;
+
+// Add noise for simulation testing
+NoiseGenerator* noiseGenerator = new NoiseGenerator();
 
 
 void FSM(uint8_t *stage){
@@ -55,6 +58,8 @@ void Stage1() {
 
     initData();
 
+    setNoise();
+
 }
 
 /*
@@ -63,7 +68,6 @@ void Stage1() {
 */
 void Stage2() {
     imu->readData(rawData);
-    calcThrottle();
 
     unsigned long now = micros();
     float dt = (now - last_pid_time) / 1000000.0;
@@ -73,11 +77,15 @@ void Stage2() {
     float setpoint_pitch = inputData->pitch_stick * pitchStickScaling;
     float setpoint_yaw   = inputData->yaw_stick   * yawStickScaling;
 
-    float pid_roll_out  = pidRoll.update(setpoint_roll, imu->getXgyro(), dt);
-    float pid_pitch_out = pidPitch.update(setpoint_pitch, imu->getYgyro(), dt);
-    float pid_yaw_out   = pidYaw.update(setpoint_yaw, imu->getZgyro(), dt);
+    float pid_roll_out  = pidRoll.update(setpoint_roll, imu->getXgyro() + noiseGenerator->getGyroNoise(), dt) ;
+    float pid_pitch_out = pidPitch.update(setpoint_pitch + noiseGenerator->getGyroNoise(), imu->getYgyro(), dt);
+    float pid_yaw_out   = pidYaw.update(setpoint_yaw + noiseGenerator->getGyroNoise(), imu->getZgyro(), dt);
 
+    inputData->roll_stick = pid_roll_out;
+    inputData->pitch_stick = pid_pitch_out;
+    inputData->yaw_stick = pid_yaw_out;
 
+    calcThrottle();
     #ifdef DEBUG
     // Print logic (unchanged)
     if (millis() - lastDebugTime > 50) {
@@ -139,4 +147,8 @@ void initData() {
 void printThrottle() { 
     MotorThrottle &mt = *motorThrottle;
     Serial.printf("M: %d %d %d %d\n", mt.M_FR, mt.M_RR, mt.M_RL, mt.M_FL);
+}
+
+void setNoise() {
+    noiseGenerator->setGyroNoiseAmplitude(gyroNoiseAmplitude);
 }

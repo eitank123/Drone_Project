@@ -4,6 +4,7 @@
     #include <Arduino.h>
     #include <imu.h>
     #include "PID.h"
+    #include "Noise.h"
 
 
     #define BUFFER_SIZE 12
@@ -18,6 +19,19 @@
     #define pitchStickScaling 0.4
     #define yawStickScaling 0.4
 
+    #define gyroNoiseAmplitude 1e-4
+    
+    #define kpRoll 0.1
+    #define kiRoll 0.1
+    #define kdRoll 0.1
+
+    #define kpPitch 0.1
+    #define kiPitch 0.1
+    #define kdPitch 0.1
+
+    #define kpYaw 0.1
+    #define kiYaw 0.1
+    #define kdYaw 0.1
     void FSM(uint8_t *stage);
     void Stage1();
     void Stage2();
@@ -26,6 +40,7 @@
     void init_imu(IMU* imu);
     void resetThrottle();
     void initData();
+    void setNoise();
 
     struct RCInputData {
     // The raw throttle value (e.g., 1000 to 2000 microseconds)
