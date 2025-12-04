@@ -3,10 +3,8 @@
 
     #include <Arduino.h>
     #include <imu.h>
-    #include <Input.h>
+    #include "PID.h"
 
-
-    #define DEBUG
 
     #define BUFFER_SIZE 12
     #define stabilizeTime 100 //in microseconds
@@ -16,12 +14,39 @@
     #define ThrottleLowerBound 1000
     #define ThrottleUpperBound 2000
 
+    #define rollStickScaling 0.4
+    #define pitchStickScaling 0.4
+    #define yawStickScaling 0.4
+
     void FSM(uint8_t *stage);
     void Stage1();
     void Stage2();
     void calcThrottle();
     void printThrottle();
     void init_imu(IMU* imu);
-    void initMotorThrottle();
-    void setThrottle(int16_t T1, int16_t T2, int16_t T3, int16_t T4);
+    void resetThrottle();
+    void initData();
+
+    struct RCInputData {
+    // The raw throttle value (e.g., 1000 to 2000 microseconds)
+    int16_t throttle_raw;
+    
+    // The control stick values (e.g., centered at 0, range -500 to 500)
+    int16_t roll_stick;
+    int16_t pitch_stick;
+    int16_t yaw_stick;
+    
+    // Add other switches/modes here
+    bool arm_switch_state;
+    };
+
+struct MotorThrottle {
+    int16_t M_RR;
+    int16_t M_RL;
+    int16_t M_FR;
+    int16_t M_FL;
+    };
+    
+    extern RCInputData* inputData;
+    extern MotorThrottle* motorThrottle;
 #endif

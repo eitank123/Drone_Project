@@ -29,7 +29,7 @@ void setup() {
     initBLE();
 
     // Create the Flight Task pinned to Core 1
-    /*xTaskCreatePinnedToCore(
+    xTaskCreatePinnedToCore(
         FlightControlTask,   // Function to run
         "FlightLoop",        // Name of task
         10000,               // Stack size (bytes) - made generous to prevent crashes
@@ -38,7 +38,7 @@ void setup() {
         &FlightTaskHandle,     // Task handle
         1                    // PIN TO CORE 1 (User Code Core)
     );
-    */
+    
     Serial.println("System Started: Flight Loop on Core 1, Bluetooth on Core 0");
 }
 

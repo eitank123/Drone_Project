@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Drone Web Controller</title>
+    <style>
+        /* BASE STYLES */
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: #1a1a1a; 
+            color: #eee; 
+            margin: 0; 
+            padding: 0;
+            overflow: hidden; /* Prevent scrolling */
+            touch-action: none; /* Prevent browser gestures */
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* HEADER */
+        header {
+            background: #252525;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #333;
+            height: 60px;
+        }
+        
+        .status-badge {
+            background: #444;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .status-connected { background: #0a0; color: #000; }
+
+        button {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        #connectBtn { background: #007bff; color: white; }
+        #armBtn { background: #444; color: #888; width: 120px; font-size: 16px; border: 2px solid #555; }
+        #armBtn.armed { background: #ff0000; color: white; border-color: #f00; animation: pulse 1s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+
+        /* MAIN CONTROL AREA */
+        #controls {
+            flex: 1;
+            display: flex;
+            position: relative;
+        }
+
+        /* LEFT PANEL (Throttle + Yaw) */
+        .control-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            border-right: 1px solid #333;
+        }
+
+        /* Throttle Slider (Vertical) */
+        .slider-container {
+            position: relative;
+            height: 60%;
+            width: 60px;
+            background: #333;
+            border-radius: 30px;
+            margin-bottom: 20px;
+        }
+        .slider-thumb {
+            position: absolute;
+            left: 5px;
+            bottom: 0; /* Starts at 0% */
+            width: 50px;
+            height: 50px;
+            background: #007bff;
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transition: bottom 0.1s linear; /* Smooth visual update */
+        }
+        /* Yaw Slider (Horizontal) */
+        .yaw-container {
+            width: 80%;
+            height: 50px;
+            background: #333;
+            border-radius: 25px;
+            position: relative;
+            margin-top: 20px;
+        }
+        .yaw-thumb {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            background: #ff9800;
+            border-radius: 50%;
+            transform: translateX(-50%);
+        }
+
+        /* RIGHT PANEL (Joystick) */
+        .joystick-zone {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(circle at center, #2a2a2a 0%, #1a1a1a 70%);
+        }
+        .joystick-base {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: #333;
+            position: relative;
+            border: 2px solid #555;
+        }
+        .joystick-stick {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: #e91e63;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        /* DATA OVERLAY */
+        #telemetry {
+            position: absolute;
+            bottom: 10px;
+            left: 0; 
+            width: 100%;
+            text-align: center;
+            font-family: monospace;
+            color: #666;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .label { color: #888; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <button id="connectBtn">CONNECT BLE</button>
+        <div id="status" class="status-badge">DISCONNECTED</div>
+        <button id="armBtn">DISARMED</button>
+    </header>
+
+    <div id="controls">
+        
+        <!-- LEFT: Throttle & Spin (Yaw) -->
+        <div class="control-panel">
+            <div class="label">Throttle (Up/Down)</div>
+            <div class="slider-container" id="throttleArea">
+                <div class="slider-thumb" id="throttleThumb"></div>
+            </div>
+
+            <div class="label">Spin (Yaw)</div>
+            <div class="yaw-container" id="yawArea">
+                <div class="yaw-thumb" id="yawThumb"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Direction (Pitch & Roll) -->
+        <div class="joystick-zone">
+            <div class="joystick-base" id="joystickBase">
+                <div class="joystick-stick" id="joystickStick"></div>
+            </div>
+        </div>
+
+        <div id="telemetry">
+            T: <span id="val-t">1000</span> | 
+            R: <span id="val-r">0</span> | 
+            P: <span id="val-p">0</span> | 
+            Y: <span id="val-y">0</span>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+        const LOOP_RATE_MS = 100; // 10Hz
+
+        // --- STATE ---
+        let flightData = {
+            throttle: 1000,
+            roll: 0,
+            pitch: 0,
+            yaw: 0,
+            armed: false
+        };
+
+        // --- UI ELEMENTS ---
+        const ui = {
+            tThumb: document.getElementById('throttleThumb'),
+            tArea: document.getElementById('throttleArea'),
+            yThumb: document.getElementById('yawThumb'),
+            yArea: document.getElementById('yawArea'),
+            jStick: document.getElementById('joystickStick'),
+            jBase: document.getElementById('joystickBase'),
+            status: document.getElementById('status'),
+            armBtn: document.getElementById('armBtn')
+        };
+
+        // --- BLUETOOTH VARIABLES ---
+        let device, characteristic;
+        let loopInterval;
+
+        // ============================
+        // 1. INPUT HANDLING (TOUCH/MOUSE)
+        // ============================
+
+        // --- THROTTLE (Vertical Slider) ---
+        let draggingThrottle = false;
+        
+        function updateThrottle(clientY) {
+            const rect = ui.tArea.getBoundingClientRect();
+            let y = rect.bottom - clientY;
+            // Clamp to 0 - height
+            y = Math.max(0, Math.min(y, rect.height));
+            
+            // Visual Update
+            // Center the thumb on the touch point
+            ui.tThumb.style.bottom = (y - 25) + "px"; 
+
+            // Logic Update (Map 0..height to 1000..2000)
+            const percent = y / rect.height;
+            flightData.throttle = Math.round(1000 + (percent * 1000));
+        }
+
+        ui.tArea.addEventListener('pointerdown', e => { draggingThrottle = true; ui.tArea.setPointerCapture(e.pointerId); updateThrottle(e.clientY); });
+        ui.tArea.addEventListener('pointermove', e => { if(draggingThrottle) updateThrottle(e.clientY); });
+        ui.tArea.addEventListener('pointerup', e => { draggingThrottle = false; });
+
+        // --- YAW (Horizontal Slider - Springs to Center) ---
+        let draggingYaw = false;
+
+        function updateYaw(clientX, release = false) {
+            const rect = ui.yArea.getBoundingClientRect();
+            const center = rect.width / 2;
+            
+            let x = clientX - rect.left;
+            
+            if (release) x = center; // Snap to center
+
+            // Clamp
+            x = Math.max(0, Math.min(x, rect.width));
+
+            // Visual
+            ui.yThumb.style.left = (x - 20) + "px"; // -20 to center thumb
+
+            // Logic (Map 0..width to -500..500)
+            const percent = (x - center) / (rect.width / 2); // -1 to 1
+            flightData.yaw = Math.round(percent * 500);
+        }
+
+        ui.yArea.addEventListener('pointerdown', e => { draggingYaw = true; ui.yArea.setPointerCapture(e.pointerId); updateYaw(e.clientX); });
+        ui.yArea.addEventListener('pointermove', e => { if(draggingYaw) updateYaw(e.clientX); });
+        ui.yArea.addEventListener('pointerup', e => { draggingYaw = false; updateYaw(0, true); });
+
+        // --- DIRECTION (Joystick - Springs to Center) ---
+        let draggingJoy = false;
+
+        function updateJoystick(clientX, clientY, release = false) {
+            const rect = ui.jBase.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const maxDist = (rect.width / 2) - 40; // boundary
+
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+
+            if (release) { dx = 0; dy = 0; }
+
+            // Limit distance (Circular clamping)
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > maxDist) {
+                const ratio = maxDist / dist;
+                dx *= ratio;
+                dy *= ratio;
+            }
+
+            // Visual
+            ui.jStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+            // Logic (Map to -500..500)
+            // Roll (X): Right is Positive
+            flightData.roll = Math.round((dx / maxDist) * 500);
+            
+            // Pitch (Y): Forward (Up on screen) should be Positive for drone forward? 
+            // Note: Screen Y Up is Negative. So we invert Y.
+            flightData.pitch = Math.round((-dy / maxDist) * 500);
+        }
+
+        ui.jBase.addEventListener('pointerdown', e => { draggingJoy = true; ui.jBase.setPointerCapture(e.pointerId); updateJoystick(e.clientX, e.clientY); });
+        ui.jBase.addEventListener('pointermove', e => { if(draggingJoy) updateJoystick(e.clientX, e.clientY); });
+        ui.jBase.addEventListener('pointerup', e => { draggingJoy = false; updateJoystick(0, 0, true); });
+
+
+        // ============================
+        // 2. ARMING LOGIC
+        // ============================
+        ui.armBtn.addEventListener('click', () => {
+            if (flightData.throttle > 1050) {
+                alert("Cannot Arm! Lower Throttle to Zero first.");
+                return;
+            }
+            
+            flightData.armed = !flightData.armed;
+            
+            if (flightData.armed) {
+                ui.armBtn.innerText = "ARMED";
+                ui.armBtn.classList.add("armed");
+            } else {
+                ui.armBtn.innerText = "DISARMED";
+                ui.armBtn.classList.remove("armed");
+            }
+        });
+
+        // ============================
+        // 3. BLUETOOTH LOGIC
+        // ============================
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'ESP32' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                device.addEventListener('gattserverdisconnected', () => {
+                    ui.status.innerText = "DISCONNECTED";
+                    ui.status.classList.remove("status-connected");
+                    clearInterval(loopInterval);
+                });
+
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+
+                ui.status.innerText = "CONNECTED";
+                ui.status.classList.add("status-connected");
+
+                // Start Data Loop
+                loopInterval = setInterval(sendData, LOOP_RATE_MS);
+
+            } catch (err) {
+                console.error(err);
+                alert("Connection Failed: " + err);
+            }
+        });
+
+        async function sendData() {
+            if (!characteristic) return;
+
+            // Update Debug Text
+            document.getElementById('val-t').innerText = flightData.throttle;
+            document.getElementById('val-r').innerText = flightData.roll;
+            document.getElementById('val-p').innerText = flightData.pitch;
+            document.getElementById('val-y').innerText = flightData.yaw;
+
+            const buffer = new ArrayBuffer(9);
+            const view = new DataView(buffer);
+
+            view.setInt16(0, flightData.throttle, true);
+            view.setInt16(2, flightData.roll, true);
+            view.setInt16(4, flightData.pitch, true);
+            view.setInt16(6, flightData.yaw, true);
+            view.setUint8(8, flightData.armed ? 1 : 0);
+
+            try {
+                await characteristic.writeValue(buffer);
+            } catch (e) {
+                console.warn("Tx Fail (Congestion)");
+            }
+        }
+
+        // Init UI positions
+        updateThrottle(window.innerHeight); // Reset throttle to 0 visual
+        ui.tThumb.style.bottom = "-25px"; // Hack to zero
+    </script>
+</body>
+</html>

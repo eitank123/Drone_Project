@@ -9,6 +9,14 @@ IMU* imu = nullptr;
 MotorThrottle* motorThrottle = nullptr;
 unsigned long lastDebugTime = 0;
 
+RCInputData* inputData = new RCInputData();
+
+PID pidRoll(1.5, 0.0, 0.5, 400);  
+PID pidPitch(1.5, 0.0, 0.5, 400);
+PID pidYaw(3.0, 0.0, 0.0, 400);
+
+unsigned long last_pid_time = 0;
+
 
 void FSM(uint8_t *stage){
     switch (*stage)
@@ -35,7 +43,7 @@ void Stage1() {
       while(1);
   }
 
-    initMotorThrottle();
+    resetThrottle();
 
     imu = new IMU(0x00);
     if (imu == nullptr) {
@@ -55,28 +63,27 @@ void Stage1() {
 */
 void Stage2() {
     imu->readData(rawData);
-    readInput();
     calcThrottle();
 
+    unsigned long now = micros();
+    float dt = (now - last_pid_time) / 1000000.0;
+    last_pid_time = now;
+
+    float setpoint_roll  = inputData->roll_stick  * rollStickScaling; // Scaling factor
+    float setpoint_pitch = inputData->pitch_stick * pitchStickScaling;
+    float setpoint_yaw   = inputData->yaw_stick   * yawStickScaling;
+
+    float pid_roll_out  = pidRoll.update(setpoint_roll, imu->getXgyro(), dt);
+    float pid_pitch_out = pidPitch.update(setpoint_pitch, imu->getYgyro(), dt);
+    float pid_yaw_out   = pidYaw.update(setpoint_yaw, imu->getZgyro(), dt);
+
+
     #ifdef DEBUG
+    // Print logic (unchanged)
     if (millis() - lastDebugTime > 200) {
         lastDebugTime = millis();
-        
-        // Use the Reference to make it readable
-        RCInputData &in = *inputData; 
-        
-        Serial.printf("THROT: %d | ROLL: %d | PITCH: %d | YAW: %d | ARM: %d\n", 
-                      in.throttle_raw, 
-                      in.roll_stick, 
-                      in.pitch_stick, 
-                      in.yaw_stick, 
-                      in.arm_switch_state);
-                      
-        // Optional: Print calculated motor outputs to see if mixing works
-        MotorThrottle &out = *motorThrottle;
-        Serial.printf("M_FR: %d | M_RR: %d | M_RL: %d | M_FL: %d\n", 
-                      out.M_FR, out.M_RR, out.M_RL, out.M_FL);
-        Serial.println("--------------------------------");
+        // Serial.printf("G_X: %.2f | SP: %.2f | PID: %.2f\n", gyro_x_dps, setpoint_roll, pid_roll_out);
+        printThrottle();
     }
     #endif
 }
@@ -87,19 +94,15 @@ void init_imu(IMU* imu)
     Serial.println("IMU Initialized Successfully");
 }
 
-void initMotorThrottle(){
-    motorThrottle->M_RR = 0;
-    motorThrottle->M_RL = 0;
-    motorThrottle->M_FR = 0;
-    motorThrottle->M_FL = 0;
-}
-
-void setThrottle(int16_t T1, int16_t T2, int16_t T3, int16_t T4){
-    MotorThrottle &mt = *motorThrottle;
-    mt.M_RR = T1;
-    mt.M_RL = T2;
-    mt.M_FR = T3;
-    mt.M_FL = T4;
+void resetThrottle(){
+    pidRoll.reset();
+    pidPitch.reset();
+    pidYaw.reset();
+        
+    motorThrottle->M_FR = ThrottleLowerBound;
+    motorThrottle->M_RR = ThrottleLowerBound;
+    motorThrottle->M_RL = ThrottleLowerBound;
+    motorThrottle->M_FL = ThrottleLowerBound;
 }
 
 void calcThrottle(){
@@ -122,21 +125,18 @@ void calcThrottle(){
     mt.M_RR = constrain(mt.M_RR, ThrottleLowerBound, ThrottleUpperBound);
     mt.M_RL = constrain(mt.M_RL, ThrottleLowerBound, ThrottleUpperBound);
     mt.M_FL = constrain(mt.M_FL, ThrottleLowerBound, ThrottleUpperBound); 
-    
-    #ifdef DEBUG
-        //printThrottle();
-    #endif
 }
 
-void printThrottle(){
-    MotorThrottle &mt = *motorThrottle;
+void initData() {
+    // Initialize input data here if needed
+    inputData->throttle_raw = ThrottleLowerBound;
+    inputData->roll_stick = 0;
+    inputData->pitch_stick = 0;
+    inputData->yaw_stick = 0;
+    inputData->arm_switch_state = false;
+}
 
-    Serial.print("Motor Throttle FR: ");
-    Serial.println(mt.M_FR);
-    Serial.print("Motor Throttle RR: ");
-    Serial.println(mt.M_RR);
-    Serial.print("Motor Throttle RL: ");
-    Serial.println(mt.M_RL);
-    Serial.print("Motor Throttle FL: ");
-    Serial.println(mt.M_FL);
+void printThrottle() { 
+    MotorThrottle &mt = *motorThrottle;
+    Serial.printf("M: %d %d %d %d\n", mt.M_FR, mt.M_RR, mt.M_RL, mt.M_FL);
 }
