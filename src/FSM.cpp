@@ -80,7 +80,7 @@ void Stage2() {
 
     #ifdef DEBUG
     // Print logic (unchanged)
-    if (millis() - lastDebugTime > 200) {
+    if (millis() - lastDebugTime > 50) {
         lastDebugTime = millis();
         // Serial.printf("G_X: %.2f | SP: %.2f | PID: %.2f\n", gyro_x_dps, setpoint_roll, pid_roll_out);
         printThrottle();
@@ -113,10 +113,10 @@ void calcThrottle(){
     MotorThrottle &mt = *motorThrottle;
     RCInputData &input = *inputData;
 
-    mt.M_FR = input.throttle_raw + input.roll_stick - input.pitch_stick + input.yaw_stick;
-    mt.M_RR = input.throttle_raw + input.roll_stick + input.pitch_stick - input.yaw_stick;
-    mt.M_RL = input.throttle_raw - input.roll_stick + input.pitch_stick + input.yaw_stick;
-    mt.M_FL = input.throttle_raw - input.roll_stick - input.pitch_stick - input.yaw_stick;
+        mt.M_FR = input.throttle_raw - input.pitch_stick - input.roll_stick + input.yaw_stick;
+        mt.M_FL = input.throttle_raw - input.pitch_stick + input.roll_stick - input.yaw_stick;
+        mt.M_RR = input.throttle_raw + input.pitch_stick - input.roll_stick - input.yaw_stick;
+        mt.M_RL = input.throttle_raw + input.pitch_stick + input.roll_stick + input.yaw_stick;
 
     /*
         Constrains the motor throttle values to be within the defined bounds

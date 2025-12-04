@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Motor Throttle Monitor (Web Serial)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for background and font */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1f2937; /* Dark Slate Gray */
+            color: #f3f4f6; /* Light Gray */
+            min-height: 100vh;
+        }
+
+        /* Container for the motor data (left column) */
+        .drone-container {
+            width: 300px;
+            height: 300px;
+            position: relative;
+            margin: 0 auto; /* Removed vertical margin for flex layout */
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 20px;
+            padding: 20px;
+            background-color: #374151; /* Medium Gray */
+            border-radius: 1rem;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Motor block styling */
+        .motor {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            border-radius: 0.5rem;
+            transition: all 0.1s ease-out;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            border: 1px solid #4b5563;
+            min-height: 120px;
+            background-color: #2c3748; /* Stable background */
+        }
+
+        .motor-label {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+        
+        /* Container for the value and the bar */
+        .value-bar-group {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            margin-top: 8px; 
+            padding: 0 5px; 
+        }
+
+        .throttle-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: currentColor; 
+            margin-right: 10px;
+            min-width: 60px; 
+            text-align: right;
+            transition: color 0.1s ease-out;
+        }
+
+        /* The bar visualization */
+        .throttle-bar-container {
+            flex-grow: 1; 
+            height: 15px;
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 9999px; 
+            overflow: hidden;
+        }
+
+        .throttle-bar {
+            height: 100%;
+            width: 0%; 
+            background-color: currentColor; 
+            transition: width 0.1s ease-out;
+        }
+
+
+        /* Utility for creating the heatmap COLOR effect (applied to text and bar) */
+        .color-heatmap-1000 { color: #9ca3af; } 
+        .color-heatmap-1250 { color: #3b82f6; } 
+        .color-heatmap-1500 { color: #facc15; } 
+        .color-heatmap-1750 { color: #f97316; } 
+        .color-heatmap-2000 { color: #ef4444; } 
+
+
+        /* --- Attitude Indicator Styles --- */
+        .attitude-indicator {
+            width: 250px;
+            height: 250px;
+            background-color: #4b5563; /* Indicator base color */
+            border: 5px solid #6b7280;
+            border-radius: 1rem;
+            overflow: hidden;
+            position: relative;
+            margin: 0 auto;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .attitude-ball {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 200px;
+            height: 200px;
+            background: linear-gradient(180deg, #10b981 50%, #facc15 50%); /* Green (Level) / Yellow (Tilt) */
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: transform 0.1s ease-out;
+        }
+
+        .center-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            background-color: #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="p-8">
+
+    <!-- Increased max-width to 6xl for better side-by-side visibility -->
+    <div class="max-w-6xl mx-auto"> 
+        <h1 class="text-3xl font-extrabold mb-4 text-center text-indigo-400">Drone Flight Control Monitor</h1>
+        <p class="text-center text-sm mb-6 text-gray-400">
+            Real-time visualization of motor commands and inferred drone attitude.
+        </p>
+
+        <!-- Connection and Status Panel -->
+        <div class="flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-4 mb-8 p-4 bg-gray-700 rounded-lg shadow-xl">
+            <button id="connectBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-150 shadow-md disabled:bg-gray-500">
+                Connect Serial Port
+            </button>
+            <p id="status" class="text-sm font-mono text-yellow-300">Status: Disconnected</p>
+            <button id="disconnectBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition duration-150 shadow-md disabled:bg-gray-500" disabled>
+                Disconnect
+            </button>
+        </div>
+
+        <!-- Main Content: Two Columns (md:flex-row forces side-by-side starting at tablet size) -->
+        <div class="flex flex-col md:flex-row gap-8">
+            
+            <!-- Left Column: Motor Throttle Visualization (Value Matrix) -->
+            <div class="md:w-1/2">
+                <h2 class="text-xl font-semibold mb-3 text-center">Motor Output Heatmap</h2>
+                <div class="drone-container">
+                    <!-- Top Left: Front Left (FL) -->
+                    <div id="M_FL" class="motor color-heatmap-1000">
+                        <span class="motor-label">Front Left (FL)</span>
+                        <div class="value-bar-group">
+                            <span class="throttle-value" data-value="1000">1000</span>
+                            <div class="throttle-bar-container">
+                                <div class="throttle-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Top Right: Front Right (FR) -->
+                    <div id="M_FR" class="motor color-heatmap-1000">
+                        <span class="motor-label">Front Right (FR)</span>
+                         <div class="value-bar-group">
+                            <span class="throttle-value" data-value="1000">1000</span>
+                            <div class="throttle-bar-container">
+                                <div class="throttle-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Left: Rear Left (RL) -->
+                    <div id="M_RL" class="motor color-heatmap-1000">
+                        <span class="motor-label">Rear Left (RL)</span>
+                         <div class="value-bar-group">
+                            <span class="throttle-value" data-value="1000">1000</span>
+                            <div class="throttle-bar-container">
+                                <div class="throttle-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Right: Rear Right (RR) -->
+                    <div id="M_RR" class="motor color-heatmap-1000">
+                        <span class="motor-label">Rear Right (RR)</span>
+                        <div class="value-bar-group">
+                            <span class="throttle-value" data-value="1000">1000</span>
+                            <div class="throttle-bar-container">
+                                <div class="throttle-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Column: Attitude Animation -->
+            <div class="md:w-1/2">
+                <h2 class="text-xl font-semibold mb-3 text-center">Inferred Attitude (Roll/Pitch)</h2>
+                <div class="attitude-indicator">
+                    <div id="attitudeBall" class="attitude-ball"></div>
+                    <div class="center-dot"></div>
+                </div>
+            </div>
+
+        </div>
+        
+
+
+        <!-- Raw Log (for debugging) -->
+        <div class="mt-8">
+            <h2 class="text-xl font-semibold mb-2">Serial Log:</h2>
+            <div id="log" class="bg-gray-800 p-3 h-32 overflow-y-scroll rounded-md text-xs font-mono text-gray-200">
+                Awaiting connection...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global Variables
+        let port = null;
+        let reader = null;
+        let reading = false;
+
+        // DOM Elements
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusP = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        const attitudeBall = document.getElementById('attitudeBall');
+        const motors = {
+            M_FR: document.getElementById('M_FR'),
+            M_RR: document.getElementById('M_RR'),
+            M_RL: document.getElementById('M_RL'),
+            M_FL: document.getElementById('M_FL'),
+        };
+
+        // --- Core Functions ---
+
+        /**
+         * Maps a throttle value (1000-2000) to a specific heatmap CSS color class.
+         */
+        function getHeatmapColorClass(value) {
+            value = parseInt(value);
+            if (value >= 1900) return 'color-heatmap-2000'; // Red
+            if (value >= 1650) return 'color-heatmap-1750'; // Orange
+            if (value >= 1400) return 'color-heatmap-1500'; // Yellow
+            if (value >= 1100) return 'color-heatmap-1250'; // Blue
+            return 'color-heatmap-1000'; // Gray/Off
+        }
+        
+        /**
+         * Parses a single line from the serial monitor.
+         * Looks for the pattern: M: M_FR M_RR M_RL M_FL
+         */
+        function parseLine(line) {
+            logDiv.innerHTML += `<div>${line}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+
+            const match = line.match(/^M: (\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+            
+            if (match) {
+                // The order is M_FR, M_RR, M_RL, M_FL in the serial output
+                const motorData = {
+                    M_FR: parseInt(match[1]),
+                    M_RR: parseInt(match[2]),
+                    M_RL: parseInt(match[3]),
+                    M_FL: parseInt(match[4]),
+                };
+                updateVisualization(motorData);
+            }
+        }
+        
+        /**
+         * Central update function for all visualizations.
+         * @param {object} motorData - {M_FR: V1, M_RR: V2, M_RL: V3, M_FL: V4}
+         */
+        function updateVisualization(motorData) {
+            
+            // --- 1. Update Motor Visualization (Heatmap & Bar) ---
+            const motorKeys = ['M_FR', 'M_RR', 'M_RL', 'M_FL'];
+            
+            motorKeys.forEach((key) => {
+                const motorElement = motors[key];
+                const value = motorData[key];
+                
+                // Update text value and color
+                const valueSpan = motorElement.querySelector('.throttle-value');
+                valueSpan.textContent = value;
+                const newColorClass = getHeatmapColorClass(value);
+                // Remove existing heatmap classes and re-add 'motor' and the new color class
+                motorElement.className = motorElement.className.replace(/color-heatmap-\d+/g, '');
+                motorElement.classList.add('motor', newColorClass); 
+                
+                // Update Bar Width
+                const throttleBar = motorElement.querySelector('.throttle-bar');
+                // Calculate percentage (0% at 1000, 100% at 2000)
+                let percent = Math.max(0, (value - 1000) / 10); 
+                percent = Math.min(100, percent); 
+                throttleBar.style.width = `${percent}%`;
+            });
+
+            // --- 2. Update Attitude Indicator (Animation) ---
+            
+            const { M_FR, M_RR, M_RL, M_FL } = motorData;
+            
+            // Normalize values (0 to 1000)
+            const normalize = (v) => Math.max(0, v - 1000);
+            const N_FR = normalize(M_FR);
+            const N_RR = normalize(M_RR);
+            const N_RL = normalize(M_RL);
+            const N_FL = normalize(M_FL);
+
+            // Calculate Roll and Pitch Difference
+            
+            // Roll: (Left Motors) - (Right Motors) -> (FL + RL) - (FR + RR)
+            const rollDiff = (N_FL + N_RL) - (N_FR + N_RR);
+            
+            // Pitch: (Rear Motors) - (Front Motors) -> (RR + RL) - (FR + FL)
+            const pitchDiff = (N_RR + N_RL) - (N_FR + N_FL);
+            
+            // Max possible absolute difference is 2000
+            const MAX_DIFF = 2000;
+            const MAX_PIXEL_SHIFT = 50; 
+
+            // Roll: Left/Right shift (X axis)
+            // Positive RollDiff (Left side high, rolling Left) -> Move indicator ball Right (Positive X)
+            const rollShift = (rollDiff / MAX_DIFF) * MAX_PIXEL_SHIFT;
+
+            // Pitch: Forward/Backward shift (Y axis)
+            // Positive PitchDiff (Rear side high, pitching Back/Nose Up) -> Move indicator ball Down (Positive Y)
+            const pitchShift = (pitchDiff / MAX_DIFF) * MAX_PIXEL_SHIFT;
+
+            // Apply transformation to the attitude ball
+            // translate(X, Y) where X is roll and Y is pitch shift
+            attitudeBall.style.transform = `translate(calc(-50% + ${rollShift}px), calc(-50% + ${pitchShift}px))`;
+        }
+
+        /**
+         * Main reading loop for the serial port.
+         */
+        async function readSerialLoop() {
+            const textDecoder = new TextDecoderStream();
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+            
+            let buffer = '';
+
+            while (port.readable && reading) {
+                try {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    buffer += value;
+                    
+                    let newlineIndex;
+                    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                        const line = buffer.substring(0, newlineIndex).trim();
+                        buffer = buffer.substring(newlineIndex + 1);
+                        if (line.length > 0) {
+                            parseLine(line);
+                        }
+                    }
+
+                } catch (error) {
+                    console.error('Reading error:', error);
+                    break;
+                }
+            }
+
+            if (reader) {
+                reader.releaseLock();
+            }
+            if (readableStreamClosed) {
+                await readableStreamClosed.catch(() => {});
+            }
+            if (reading) {
+                disconnectSerial();
+            }
+        }
+
+        /**
+         * Attempts to connect to a serial port.
+         */
+        async function connectSerial() {
+            if (!('serial' in navigator)) {
+                showModal('Browser Error', 'Web Serial API not supported in this browser. Please use Chrome/Edge.', 'OK');
+                return;
+            }
+
+            try {
+                port = await navigator.serial.requestPort();
+                
+                await port.open({ baudRate: 115200 });
+                
+                reading = true;
+                statusP.textContent = 'Status: Connected';
+                statusP.classList.remove('text-yellow-300');
+                statusP.classList.add('text-green-400');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                logDiv.innerHTML = '';
+                
+                readSerialLoop();
+
+            } catch (error) {
+                statusP.textContent = 'Status: Disconnected (Error)';
+                console.error('Serial Connection Error:', error);
+                showModal('Connection Error', `Connection Error: ${error.message}. Ensure the port is not in use.`, 'OK');
+            }
+        }
+
+        /**
+         * Disconnects the serial port and cleans up.
+         */
+        async function disconnectSerial() {
+            reading = false;
+            if (reader) {
+                await reader.cancel();
+            }
+            if (port) {
+                await port.close();
+            }
+            
+            port = null;
+            reader = null;
+
+            statusP.textContent = 'Status: Disconnected';
+            statusP.classList.remove('text-green-400');
+            statusP.classList.add('text-yellow-300');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        }
+
+        // --- Custom Modal/Alert Replacement ---
+
+        function showModal(title, message, buttonText) {
+            const modalHtml = `
+                <div id="customModal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div class="bg-gray-700 p-6 rounded-lg shadow-2xl max-w-sm w-full">
+                        <h3 class="text-xl font-bold mb-4 text-red-400">${title}</h3>
+                        <p class="text-gray-200 mb-6">${message}</p>
+                        <button id="modalCloseBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg transition duration-150">${buttonText}</button>
+                    </div>
+                </div>
+            `;
+            
+            const existingModal = document.getElementById('customModal');
+            if (existingModal) existingModal.remove();
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            document.getElementById('modalCloseBtn').onclick = () => {
+                document.getElementById('customModal').remove();
+            };
+        }
+
+
+        // --- Event Listeners ---
+        connectBtn.addEventListener('click', connectSerial);
+        disconnectBtn.addEventListener('click', disconnectSerial);
+
+        window.onload = () => {
+             if (!('serial' in navigator)) {
+                connectBtn.disabled = true;
+                statusP.textContent = 'Status: Browser Not Supported';
+                statusP.classList.remove('text-yellow-300');
+                statusP.classList.add('text-red-500');
+             }
+        };
+
+    </script>
+</body>
+</html>
