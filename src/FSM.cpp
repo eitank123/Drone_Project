@@ -1,9 +1,6 @@
 #include <FSM.h>
 
 uint8_t rawData[BUFFER_SIZE];
-int16_t T = 800; // Sample rate
-float delayTime = 1e6 / T;
-float delta_t = 1.0 / T;
 
 IMU* imu = nullptr;
 MotorThrottle* motorThrottle = nullptr;
@@ -11,9 +8,9 @@ unsigned long lastDebugTime = 0;
 
 RCInputData* inputData = new RCInputData();
 
-PID pidRoll(1.5, 0.0, 0.5, 400);  
-PID pidPitch(1.5, 0.0, 0.5, 400);
-PID pidYaw(3.0, 0.0, 0.0, 400);
+PID pidRoll(kp, ki, kd, 400);  
+PID pidPitch(kp, ki, kd, 400);
+PID pidYaw(kp, ki, kd, 400);
 
 unsigned long last_pid_time = 0;
 
@@ -63,29 +60,58 @@ void Stage1() {
 */
 void Stage2() {
     imu->readData(rawData);
-    calcThrottle();
 
     unsigned long now = micros();
-    float dt = (now - last_pid_time) / 1000000.0;
     last_pid_time = now;
 
-    float setpoint_roll  = inputData->roll_stick  * rollStickScaling; // Scaling factor
-    float setpoint_pitch = inputData->pitch_stick * pitchStickScaling;
-    float setpoint_yaw   = inputData->yaw_stick   * yawStickScaling;
+    set_current_angle();
 
-    float pid_roll_out  = pidRoll.update(setpoint_roll, imu->getXgyro(), dt);
-    float pid_pitch_out = pidPitch.update(setpoint_pitch, imu->getYgyro(), dt);
-    float pid_yaw_out   = pidYaw.update(setpoint_yaw, imu->getZgyro(), dt);
+    angle_setpoints setpoints = calc_setpoints();
 
+    inputData->roll_stick  = pidRoll.update(setpoints.setpoint_rate_roll, imu->getXgyro(), dt);
+    inputData->pitch_stick = pidPitch.update(setpoints.setpoint_rate_pitch, imu->getYgyro(), dt);
+    inputData->yaw_stick   = pidYaw.update(inputData->yaw_stick, imu->getZgyro(), dt);
+
+    calcThrottle();
 
     #ifdef DEBUG
     // Print logic (unchanged)
     if (millis() - lastDebugTime > 50) {
         lastDebugTime = millis();
-        // Serial.printf("G_X: %.2f | SP: %.2f | PID: %.2f\n", gyro_x_dps, setpoint_roll, pid_roll_out);
         printThrottle();
+        printAngle();
     }
     #endif
+}
+
+void set_current_angle(){
+    // --- 1. CALCULATE ACCELEROMETER ANGLES ---
+    // (Requires math.h)
+    float accRoll  = atan2(imu->getYaccel(), imu->getZaccel()) * 57.296; 
+    float accPitch = atan2(-imu->getXaccel(), sqrt(imu->getYaccel()*imu->getYaccel() + imu->getZaccel()*imu->getZaccel())) * 57.296;
+
+    // Combine Gyro Integration (fast) with Accel (stable)
+    imu->set_current_angle_roll(accRoll, dt);
+    imu->set_current_angle_pitch(accPitch, dt);
+}
+
+angle_setpoints calc_setpoints() {
+    // HTML sends -500 to 500. We want -45 to 45 degrees.
+    // Multiplier: 45 / 500 = 0.09
+    float target_angle_roll  = inputData->roll_stick * 0.09; 
+    float target_angle_pitch = inputData->pitch_stick * 0.09;
+
+    // --- 2. CALCULATE ANGLE ERROR ---
+    float error_roll  = target_angle_roll - imu->getCurrentAngleRoll();
+    float error_pitch = target_angle_pitch - imu->getCurrentAnglePitch();
+
+    float setpoint_rate_roll  = error_roll * level_strength;
+    float setpoint_rate_pitch = error_pitch * level_strength;
+
+    angle_setpoints setpoints;
+    setpoints.setpoint_rate_roll = setpoint_rate_roll;
+    setpoints.setpoint_rate_pitch = setpoint_rate_pitch;
+    return setpoints;
 }
 
 void init_imu(IMU* imu)
@@ -139,4 +165,9 @@ void initData() {
 void printThrottle() { 
     MotorThrottle &mt = *motorThrottle;
     Serial.printf("M: %d %d %d %d\n", mt.M_FR, mt.M_RR, mt.M_RL, mt.M_FL);
+}
+
+void printAngle() {
+    IMU &imuRef = *imu;
+    Serial.printf("Angle Roll: %.2f | Angle Pitch: %.2f\n", imuRef.getCurrentAngleRoll(), imuRef.getCurrentAnglePitch());
 }

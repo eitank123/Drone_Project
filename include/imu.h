@@ -30,6 +30,8 @@
 #define ACCEL_CUTOFF 0.05
 #define GYRO_CUTOFF 0.3
 
+#define alpha 0.98 // Gyro integrity
+
 //#define DEBUG
 
 
@@ -54,10 +56,16 @@ public:
     float getXgyro();
     float getYgyro();
     float getZgyro();
+    float getCurrentAngleRoll();
+    float getCurrentAnglePitch();
+    void set_current_angle_roll(float accRoll, float dt);
+    void set_current_angle_pitch(float accPitch, float dt);
 private:
     IMUData _data;
     uint8_t _address;
     SPIComm _spiComm;
+    float _current_angle_roll;
+    float _current_angle_pitch;
     void dataCutoff();
 };
 

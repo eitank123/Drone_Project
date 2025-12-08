@@ -14,18 +14,15 @@
     #define ThrottleLowerBound 1000
     #define ThrottleUpperBound 2000
 
-    #define rollStickScaling 0.4
-    #define pitchStickScaling 0.4
-    #define yawStickScaling 0.4
+    #define rollStickScaling 0.2
+    #define pitchStickScaling 0.2
+    #define yawStickScaling 0.2
 
-    void FSM(uint8_t *stage);
-    void Stage1();
-    void Stage2();
-    void calcThrottle();
-    void printThrottle();
-    void init_imu(IMU* imu);
-    void resetThrottle();
-    void initData();
+    #define kp 0.2
+    #define ki 0.005
+    #define kd 0.02
+
+    #define level_strength 10.0
 
     struct RCInputData {
     // The raw throttle value (e.g., 1000 to 2000 microseconds)
@@ -46,7 +43,26 @@ struct MotorThrottle {
     int16_t M_FR;
     int16_t M_FL;
     };
-    
+
+struct angle_setpoints {
+    float setpoint_rate_roll;
+    float setpoint_rate_pitch;
+};
+    void FSM(uint8_t *stage);
+    void Stage1();
+    void Stage2();
+    void calcThrottle();
+    void printThrottle();
+    void printAngle();
+    void init_imu(IMU* imu);
+    void resetThrottle();
+    void initData();
+    void set_current_angle();
+    angle_setpoints calc_setpoints();
     extern RCInputData* inputData;
     extern MotorThrottle* motorThrottle;
+
+    const long SAMPLE_RATE_HZ = 20; 
+    const unsigned long LOOP_INTERVAL_US = 1e6 / SAMPLE_RATE_HZ;
+    const float dt = 1.0 / SAMPLE_RATE_HZ;                
 #endif

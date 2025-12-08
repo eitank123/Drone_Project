@@ -4,7 +4,7 @@
 #include <imu.h>
 
 
-IMU::IMU(uint8_t address) : _address(address), _spiComm(CS_PIN) {}
+IMU::IMU(uint8_t address) : _address(address), _spiComm(CS_PIN), _current_angle_roll(0), _current_angle_pitch(0) {}
 
 void IMU::begin() {
     // Add IMU initialization code here
@@ -74,6 +74,25 @@ void IMU::dataCutoff()
     _data.gyroZ = abs(_data.gyroZ) > GYRO_CUTOFF ? _data.gyroZ : 0;
 }
 
+void IMU::set_current_angle_roll(float accRoll, float dt)
+{
+    _current_angle_roll  = alpha * (_current_angle_roll + _data.gyroX * dt) + (1.0 - alpha) * accRoll;
+}
+
+void IMU::set_current_angle_pitch(float accPitch, float dt)
+{
+    _current_angle_pitch = alpha * (_current_angle_pitch + _data.gyroY * dt) + (1.0 - alpha) * accPitch;
+}
+
+float IMU::getCurrentAngleRoll()
+{
+    return _current_angle_roll;
+}
+
+float IMU::getCurrentAnglePitch()
+{
+    return _current_angle_pitch;
+}
 
 float IMU::getXaccel()
 {
