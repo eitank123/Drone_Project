@@ -1,137 +1,124 @@
-// imu.cpp
-// Implementation file for IMU communication
+#include "imu.h"
+#include <cmath>
 
-#include <imu.h>
+#define SDA_PIN 8
+#define SCL_PIN 9
+
+ICM_20948_I2C myICM;
+
+// Filter constants
+const float gyro_trust = 0.96; // Trust gyro 96%, trust accel/mag 4%
+const float mag_trust = 0.005;  // Trust magnetometer corrections at 10% to prevent drift over time
+unsigned long lastTime = 0;
+EulerAngles currentAngles = {0, 0, 0};
 
 
-IMU::IMU(uint8_t address) : _address(address), _spiComm(CS_PIN), _current_angle_roll(0), _current_angle_pitch(0) {}
+SemaphoreHandle_t i2cMutex;
 
-void IMU::begin() {
-    // Add IMU initialization code here
-    _spiComm.begin();
-    Serial.println("Initializing BMI323...");
-  
-     // 1. Soft Reset
-    _spiComm.spiWrite16(BMI323_REG_CMD, 0xDEAF);
-    delay(50); // Wait for reset
-
-    // 2. Dummy Read (To clear SPI garbage)
-    _spiComm.spiRead8(0x00);
-    // 3. Verify Chip ID
-    uint8_t chipID = _spiComm.spiRead8(_address);
-    Serial.print("Chip ID: 0x");
-    Serial.println(chipID, HEX);
-    
-    if(chipID != BMI323_ID) {
-        Serial.println("Error: Chip ID mismatch or communication fail.");
-        while(1);
+void initIMU() {
+    i2cMutex = xSemaphoreCreateMutex();
+    Wire.begin(SDA_PIN, SCL_PIN);
+    Wire.setClock(400000);
+    myICM.begin(Wire, 1); // Assuming AD0 is GND
+    while (myICM.status != ICM_20948_Stat_Ok) {
+        delay(500);
     }
-
-    // 4. ENABLE SENSORS (The Fix)
-    // We must write 16 bits to set Mode to "High Performance"
-    Serial.println("Enabling Accelerometer & Gyro...");
-    _spiComm.spiWrite16(BMI323_REG_ACC_CONF, CONF_ACC_ENABLE);
-    delay(10);
-    _spiComm.spiWrite16(BMI323_REG_GYR_CONF, CONF_GYR_ENABLE);
-    delay(50); // Wait for filter settling
+    lastTime = micros();
 }
 
-void IMU::readData(uint8_t rawData[12]) {
-    // Read 12 bytes: Acc X, Y, Z + Gyro X, Y, Z
-  _spiComm.spiReadBurst(BMI323_REG_ACC_DATA_X, rawData, 12);
+float magX_min = 1000, magX_max = -1000;
+float magY_min = 1000, magY_max = -1000;
 
-  // Reassemble 16-bit signed integers
-  try
-  {
-    /* code */
-    _data.accelX = (int16_t)((rawData[1] << 8) | rawData[0]) / ACCEL_SENSITIVITY;
-    _data.accelY = (int16_t)((rawData[3] << 8) | rawData[2]) / ACCEL_SENSITIVITY;
-    _data.accelZ = (int16_t)((rawData[5] << 8) | rawData[4]) / ACCEL_SENSITIVITY;
+void calibrateMag() {
+    if (xSemaphoreTake(i2cMutex, portMAX_DELAY)) {
+      myICM.getAGMT(); // Talk to sensor
+      xSemaphoreGive(i2cMutex); // Give the "key" back
+    }
+    float x = myICM.magX();
+    float y = myICM.magY();
 
-    _data.gyroX = (int16_t)((rawData[7] << 8) | rawData[6]) / GYRO_SENSITIVITY;
-    _data.gyroY = (int16_t)((rawData[9] << 8) | rawData[8]) / GYRO_SENSITIVITY;
-    _data.gyroZ = (int16_t)((rawData[11] << 8) | rawData[10]) / GYRO_SENSITIVITY;
+    if (x < magX_min) magX_min = x;
+    if (x > magX_max) magX_max = x;
+    if (y < magY_min) magY_min = y;
+    if (y > magY_max) magY_max = y;
 
-    dataCutoff();
-  }
-  catch(const std::exception& e)
-  {
-    Serial.println(e.what());
-    #ifdef DEBUG
-      Serial.println("Read Failed");
-    #endif
-  }  
-}
-
-void IMU::dataCutoff()
-{
-    _data.accelX = abs(_data.accelX) > ACCEL_CUTOFF ? _data.accelX : 0;
-    _data.accelY = abs(_data.accelY) > ACCEL_CUTOFF ? _data.accelY : 0;
-    _data.accelZ = abs(_data.accelZ) > ACCEL_CUTOFF ? _data.accelZ : 0;
-
-    _data.gyroX = abs(_data.gyroX) > GYRO_CUTOFF ? _data.gyroX : 0;
-    _data.gyroY = abs(_data.gyroY) > GYRO_CUTOFF ? _data.gyroY : 0;
-    _data.gyroZ = abs(_data.gyroZ) > GYRO_CUTOFF ? _data.gyroZ : 0;
-}
-
-void IMU::set_current_angle_roll(float accRoll, float dt)
-{
-    _current_angle_roll  = alpha * (_current_angle_roll + _data.gyroX * dt) + (1.0 - alpha) * accRoll;
-}
-
-void IMU::set_current_angle_pitch(float accPitch, float dt)
-{
-    _current_angle_pitch = alpha * (_current_angle_pitch + _data.gyroY * dt) + (1.0 - alpha) * accPitch;
-}
-
-float IMU::getCurrentAngleRoll()
-{
-    return _current_angle_roll;
-}
-
-float IMU::getCurrentAnglePitch()
-{
-    return _current_angle_pitch;
-}
-
-float IMU::getXaccel()
-{
-    return _data.accelX;
+    Serial.print("X_Min:"); Serial.print(magX_min);
+    Serial.print(" X_Max:"); Serial.print(magX_max);
+    Serial.print(" | Y_Min:"); Serial.print(magY_min);
+    Serial.print(" Y_Max:"); Serial.println(magY_max);
 }
 
 
-float IMU::getYaccel()
-{
-    return _data.accelY;
+EulerAngles getOrientation() {
+    if (myICM.dataReady()) {
+      if (xSemaphoreTake(i2cMutex, portMAX_DELAY)) {
+        myICM.getAGMT(); // Talk to sensor
+        xSemaphoreGive(i2cMutex); // Give the "key" back
+      }
+
+        // 1. Calculate Delta Time
+        unsigned long currentTime = micros();
+        float dt = FastLoopTime / 1000.0; // Convert ms to seconds
+        lastTime = currentTime;
+
+        calcRollPitch(dt);
+        calcYaw(dt);
+
+        
+      }
+    return currentAngles;
 }
 
-float IMU::getZaccel()
-{
-    return _data.accelZ;
+void calcRollPitch(float dt){
+        // 2. Pitch and Roll from Accelerometer (Trigonometry)
+        // atan2 returns radians, we convert to degrees
+        float accRoll = atan2(myICM.accY(), myICM.accZ()) * 180.0 / M_PI;
+        float accPitch = atan2(-myICM.accX(), sqrt((myICM.accY() * myICM.accY()) + (myICM.accZ() * myICM.accZ()))) * 180.0 / M_PI;
+        // 3. Integrate Gyroscope (Angle = Velocity * Time)
+        // The ICM-20948 provides dps (degrees per second)
+        currentAngles.roll  = gyro_trust * (currentAngles.roll + myICM.gyrX() * dt) + (1.0 - gyro_trust) * accRoll;
+        currentAngles.pitch = gyro_trust * (currentAngles.pitch + myICM.gyrY() * dt) + (1.0 - gyro_trust) * accPitch;
 }
 
-float IMU::getXgyro()
-{
-    return _data.gyroX;
+void calcYaw(float dt){
+  float magOffsetX = 22.65;
+  float magOffsetY = 14.17; 
+
+  float magX = myICM.magX() - magOffsetX;
+  float magY = myICM.magY() - magOffsetY;
+
+  float heading = atan2(magY, magX) * 180.0 / M_PI;
+        
+  // Normalize heading to 0-360
+  if (heading < 0) heading += 360;
+
+  float gyroRateZ = myICM.gyrZ(); // Degrees per second
+
+  // 1. Calculate the raw difference
+  float deltaYaw = heading - currentAngles.yaw;
+
+  // 2. "Wrap" the difference so it takes the shortest path
+  // This prevents the "slow ramp" across the 360/0 boundary
+  if (deltaYaw > 180)  deltaYaw -= 360;
+  if (deltaYaw < -180) deltaYaw += 360;
+
+  // 3. Apply the filter using the shortest distance
+  // Trust the Gyro for movement, use the wrapped Mag delta for correction
+  currentAngles.yaw = (currentAngles.yaw + gyroRateZ * dt) + (mag_trust * deltaYaw);
+
+  // 4. Keep the final result between 0 and 360
+  if (currentAngles.yaw >= 360) currentAngles.yaw -= 360;
+  if (currentAngles.yaw < 0)    currentAngles.yaw += 360;
 }
 
-float IMU::getYgyro()
-{
-    return _data.gyroY;
+float get_gyrY(){
+    return myICM.gyrY();
 }
 
-float IMU::getZgyro()
-{
-    return _data.gyroZ;
+float get_gyrZ(){
+    return myICM.gyrZ();
 }
 
-void IMU::printData()
-{
-    Serial.print("AX: "); Serial.print(_data.accelX);
-    Serial.print(" g | AY: "); Serial.print(_data.accelY);
-    Serial.print(" g | AZ: "); Serial.print(_data.accelZ);
-    Serial.print(" g | GX: "); Serial.print(_data.gyroX);
-    Serial.print(" dps | GY: "); Serial.print(_data.gyroY);
-    Serial.print(" dps | GZ: "); Serial.print(_data.gyroZ);
-    Serial.println(" dps");
+float get_gyrX(){
+    return myICM.gyrX();
 }

@@ -3,11 +3,14 @@
 #define MAIN_H
 
 #include <Arduino.h>
-#include <FSM.h>
-#include "BLEInput.h"
+#include "PID.h"
+#include "imu.h"
+#include "ModeOfOperation.h"
+#include "MotorControl.h"
+
+//#define Calibrate_MAG
 
 
-void FlightControlTask(void *parameter);
-extern TaskHandle_t FlightTaskHandle;
-
+#define AngleMode 0
+#define AcroMode 1
 #endif
