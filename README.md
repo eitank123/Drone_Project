@@ -53,5 +53,4 @@ Optimized for **HAKRC 4-in-1 ESCs**, the system communicates via **DShot600**:
 Add the following to your `platformio.ini`:
 ```ini
 lib_deps =
-    jprochazkav/DShotRMT
     sparkfun/SparkFun ICM-20948 Arduino Library﻿# Drone_Project
