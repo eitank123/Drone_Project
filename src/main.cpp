@@ -63,6 +63,8 @@ void setup() {
         &FastLoopTask,   /* Task handle */
         1                /* Core ID */
     );
+
+    escs.begin();
 }
 
 

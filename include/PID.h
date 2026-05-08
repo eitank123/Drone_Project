@@ -14,6 +14,7 @@ public:
     float update(float setpoint, float measured, float dt);
     
     void reset();
+    void setTunings(float kp, float ki, float kd);
 
 private:
     float _kp, _ki, _kd;
@@ -22,6 +23,7 @@ private:
     float _prev_measured;   // Previous measured value (for D term)
     float _d_filtered = 0;
 };
+
 
 // derivative filter coefficient: $$ \alpha = \frac{2\pi f_c dt}{1 + 2\pi f_c dt} $$
 #define derivative_filter 0.5f // Smoothing factor for D-term low pass filter (lower = smoother but more delay)

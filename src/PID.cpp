@@ -28,6 +28,12 @@ float PID::update(float setpoint, float measured, float dt) {
     return constrain(output, -_out_limit, _out_limit);
 }
 
+void PID::setTunings(float kp, float ki, float kd) {
+    _kp = kp;
+    _ki = ki;
+    _kd = kd;
+}
+
 void PID::reset() {
     _integral = 0;
     _prev_measured = 0;
