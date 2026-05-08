@@ -37,10 +37,10 @@ Optimized for **HAKRC 4-in-1 ESCs**, the system communicates via **DShot600**:
 | :--- | :--- | :--- |
 | **I2C SDA** | 8 | IMU Data Line |
 | **I2C SCL** | 9 | IMU Clock Line |
-| **Motor 1 (S1)** | 10 | DShot Channel 0 |
-| **Motor 2 (S2)** | 11 | DShot Channel 1 |
-| **Motor 3 (S3)** | 12 | DShot Channel 2 |
-| **Motor 4 (S4)** | 13 | DShot Channel 3 |
+| **Motor 1 (S1)** | 4 | DShot Channel 0 |
+| **Motor 2 (S2)** | 5 | DShot Channel 1 |
+| **Motor 3 (S3)** | 6 | DShot Channel 2 |
+| **Motor 4 (S4)** | 7 | DShot Channel 3 |
 | **VBAT Sense** | ADC Pin | Via Voltage Divider (Max 3.3V) |
 
 ## 🛠 Project Structure
